@@ -128,6 +128,7 @@ elif source_type == 'picamera':
     cap.configure(cap.create_video_configuration(main={"format": 'XRGB8888', "size": (resW, resH)}))
     cap.start()
 
+# ------------------ Misc Setup ------------------
 bbox_colors = [(164,120,87), (68,148,228), (93,97,209), (178,182,133), (88,159,106),
                (96,202,231), (159,124,168), (169,162,241), (98,118,150), (172,176,184)]
 
@@ -196,5 +197,33 @@ while True:
             last_spoken = current_objects
             last_time = time.time()
 
+    # FPS
+    t_stop = time.perf_counter()
+    frame_rate_calc = float(1/(t_stop - t_start))
+    if len(frame_rate_buffer) >= fps_avg_len:
+        frame_rate_buffer.pop(0)
+    frame_rate_buffer.append(frame_rate_calc)
+    avg_frame_rate = np.mean(frame_rate_buffer)
+
     if source_type in ['video', 'usb', 'picamera']:
-        cv2.putText(frame, f'FPS: {avg_frame_rate:.2f}', (10, 20), cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(frame, f'FPS: {avg_frame_rate:.2f}', (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        cv2.imshow("YOLO + Russian TTS", frame)
+
+        if record:
+            recorder.write(frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    else:
+        cv2.imshow("YOLO + Russian TTS", frame)
+        cv2.waitKey(0)
+        break
+
+# ------------------ Cleanup ------------------
+if source_type in ['video', 'usb']:
+    cap.release()
+if record:
+    recorder.release()
+cv2.destroyAllWindows()
