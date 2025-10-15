@@ -62,4 +62,139 @@ labels = [
     "грузовик", "лодка", "светофор", "пожарный гидрант", "знак стоп", "паркометр",
     "скамейка", "птица", "кошка", "собака", "лошадь", "овца", "корова", "слон",
     "медведь", "зебра", "жираф", "рюкзак", "зонт", "дамская сумка", "галстук",
-    "чемодан", "фрисби", "лыжи", "сноуб
+    "чемодан", "фрисби", "лыжи", "сноуборд", "мяч", "воздушный змей", "бита",
+    "перчатка", "скейтборд", "серфборд", "теннисная ракетка", "бутылка",
+    "бокал", "чашка", "вилка", "нож", "ложка", "миска", "банан", "яблоко",
+    "сэндвич", "апельсин", "брокколи", "морковь", "хот-дог", "пицца", "пончик",
+    "торт", "стул", "диван", "растение", "кровать", "обеденный стол", "туалет",
+    "телевизор", "ноутбук", "мышь", "пульт", "клавиатура", "телефон", "микроволновка",
+    "духовка", "тостер", "раковина", "холодильник", "книга", "часы", "ваза",
+    "ножницы", "медвежонок", "фен", "зубная щетка"
+]
+
+# ------------------ Source Type Detection ------------------
+img_ext_list = ['.jpg', '.jpeg', '.png', '.bmp']
+vid_ext_list = ['.avi', '.mov', '.mp4', '.mkv', '.wmv']
+
+if os.path.isdir(img_source):
+    source_type = 'folder'
+elif os.path.isfile(img_source):
+    _, ext = os.path.splitext(img_source)
+    if ext in img_ext_list:
+        source_type = 'image'
+    elif ext in vid_ext_list:
+        source_type = 'video'
+    else:
+        print(f'File extension {ext} is not supported.')
+        sys.exit(0)
+elif 'usb' in img_source:
+    source_type = 'usb'
+    usb_idx = int(img_source[3:])
+elif 'picamera' in img_source:
+    source_type = 'picamera'
+    picam_idx = int(img_source[8:])
+else:
+    print(f'Input {img_source} is invalid.')
+    sys.exit(0)
+
+# ------------------ Resolution & Recorder Setup ------------------
+resize = False
+if user_res:
+    resize = True
+    resW, resH = map(int, user_res.split('x'))
+
+if record:
+    if source_type not in ['video', 'usb']:
+        print('Recording only works for video and camera sources.')
+        sys.exit(0)
+    if not user_res:
+        print('Please specify resolution to record video at.')
+        sys.exit(0)
+    recorder = cv2.VideoWriter('demo1.avi', cv2.VideoWriter_fourcc(*'MJPG'), 30, (resW, resH))
+
+# ------------------ Input Source Setup ------------------
+if source_type == 'image':
+    imgs_list = [img_source]
+elif source_type == 'folder':
+    imgs_list = [f for f in glob.glob(img_source + '/*') if os.path.splitext(f)[1] in img_ext_list]
+elif source_type in ['video', 'usb']:
+    cap = cv2.VideoCapture(img_source if source_type == 'video' else usb_idx)
+    if resize:
+        cap.set(3, resW)
+        cap.set(4, resH)
+elif source_type == 'picamera':
+    from picamera2 import Picamera2
+    cap = Picamera2()
+    cap.configure(cap.create_video_configuration(main={"format": 'XRGB8888', "size": (resW, resH)}))
+    cap.start()
+
+bbox_colors = [(164,120,87), (68,148,228), (93,97,209), (178,182,133), (88,159,106),
+               (96,202,231), (159,124,168), (169,162,241), (98,118,150), (172,176,184)]
+
+avg_frame_rate = 0
+frame_rate_buffer = []
+fps_avg_len = 200
+img_count = 0
+last_spoken = ""
+last_time = time.time()
+
+# ------------------ Main Inference Loop ------------------
+while True:
+    t_start = time.perf_counter()
+
+    if source_type in ['image', 'folder']:
+        if img_count >= len(imgs_list):
+            print('All images processed. Exiting.')
+            break
+        frame = cv2.imread(imgs_list[img_count])
+        img_count += 1
+    elif source_type in ['video', 'usb']:
+        ret, frame = cap.read()
+        if not ret:
+            print('No more frames or camera error.')
+            break
+    elif source_type == 'picamera':
+        frame_bgra = cap.capture_array()
+        frame = cv2.cvtColor(np.copy(frame_bgra), cv2.COLOR_BGRA2BGR)
+
+    if resize:
+        frame = cv2.resize(frame, (resW, resH))
+
+    results = model(frame, verbose=False)
+    detections = results[0].boxes
+    object_count = 0
+    detected_labels = []
+
+    for i in range(len(detections)):
+        xyxy_tensor = detections[i].xyxy.cpu()
+        xyxy = xyxy_tensor.numpy().squeeze()
+        xmin, ymin, xmax, ymax = xyxy.astype(int)
+
+        classidx = int(detections[i].cls.item())
+        classname = labels[classidx]
+        conf = detections[i].conf.item()
+
+        if conf > min_thresh:
+            color = bbox_colors[classidx % 10]
+            cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), color, 2)
+
+            label = f'{classname}: {int(conf*100)}%'
+            label_ymin = max(ymin, 25)
+
+            # Draw label with PIL
+            frame = draw_russian_text(frame, label, (xmin, label_ymin - 25))
+
+            object_count += 1
+            detected_labels.append(classname)
+
+    # Speak if necessary
+    if detected_labels:
+        current_objects = ", ".join(set(detected_labels))
+        if current_objects != last_spoken or time.time() - last_time > 5:
+            print(f"Обнаружено: {current_objects}")
+            speak(f"Я вижу: {current_objects}")
+            last_spoken = current_objects
+            last_time = time.time()
+
+    if source_type in ['video', 'usb', 'picamera']:
+        cv2.putText(frame, f'FPS: {avg_frame_rate:.2f}', (10, 20), cv2.FONT_HERSHEY_SIMPLEX
