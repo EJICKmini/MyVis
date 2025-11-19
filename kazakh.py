@@ -8,12 +8,12 @@ from gtts import gTTS
 import os
 
 WEIGHTS = "/home/sst/projects/CIS/yolov8n.pt"
-CONF_THRESHOLD = 0.20
-IOU_THRESHOLD = 0.35
+CONF_THRESHOLD = 0.30
+IOU_THRESHOLD = 0.45
 TTS_FILENAME = "tts_temp.mp3"
 TTS_LOCK = threading.Lock()
-FRAME_WIDTH = 720
-FRAME_HEIGHT = 480
+FRAME_WIDTH = 320
+FRAME_HEIGHT = 240
 
 model = YOLO(WEIGHTS)
 
@@ -95,7 +95,7 @@ def main():
 
             if detected_classes:
                 joined = ", ".join(sorted(set(detected_classes)))
-                if joined != last_detected or time.time() - last_time > 3:
+                if joined != last_detected or time.time() - last_time > 1:
                     speak_async(f"Я вижу {joined}")
                     last_detected = joined
                     last_time = time.time()
